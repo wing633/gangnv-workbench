@@ -1644,30 +1644,48 @@
   }
 
   // 轮询检测更新
+  var lastGistUpdatedAt = null;
   function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
     if (!syncConfig.enabled || !syncConfig.gistId) return;
-    pollTimer = setInterval(function() {
-      fetch('https://api.github.com/gists/' + syncConfig.gistId, { headers: ghHeaders() })
-        .then(function(r) {
-          if (!r.ok) return;
-          var etag = r.headers.get('etag');
-          if (remoteEtag && etag && etag !== remoteEtag) {
-            // 远端有更新
-            r.json().then(function(gist) {
-              var content = gist.files && gist.files['gangnv-data.json'] && gist.files['gangnv-data.json'].content;
-              if (content) {
-                var data = JSON.parse(content);
-                if (data.exportedAt > syncConfig.lastPush) {
-                  showSyncAlert();
-                }
-              }
-            });
-          }
-          remoteEtag = etag || remoteEtag;
-        });
-    }, 30000);
+    pollTimer = setInterval(checkRemoteUpdate, 30000);
   }
+
+  function checkRemoteUpdate() {
+    if (!syncConfig.enabled || !syncConfig.gistId) return;
+    fetch('https://api.github.com/gists/' + syncConfig.gistId, { headers: ghHeaders() })
+      .then(function(r) {
+        if (!r.ok) return;
+        return r.json();
+      })
+      .then(function(gist) {
+        if (!gist) return;
+        var updatedAt = gist.updated_at;
+        var content = gist.files && gist.files['gangnv-data.json'] && gist.files['gangnv-data.json'].content;
+        if (content && updatedAt && lastGistUpdatedAt && updatedAt !== lastGistUpdatedAt) {
+          var data = JSON.parse(content);
+          if (data.exportedAt > syncConfig.lastPush) {
+            showSyncAlert();
+          }
+        }
+        lastGistUpdatedAt = updatedAt || lastGistUpdatedAt;
+      })
+      .catch(function() {});
+  }
+
+  // 页面从后台切回时主动拉取
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && syncConfig.enabled && syncConfig.gistId) {
+      pullSync(true);
+    }
+  });
+
+  // 网络恢复时主动拉取
+  window.addEventListener('online', function() {
+    if (syncConfig.enabled && syncConfig.gistId) {
+      pullSync(true);
+    }
+  });
 
   function showSyncAlert() {
     document.getElementById('syncAlert').classList.add('show');
